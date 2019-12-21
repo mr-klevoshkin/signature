@@ -18,6 +18,7 @@ using namespace taskking;
 using namespace running;
 
 // ====================================== GLOBAL TYPES =======================================================
+
 using input_t = std::vector<char>;
 using output_t = size_t;
 
@@ -41,7 +42,7 @@ typedef struct
 
 // ====================================== CALLBACKS AND FUNCTIONS =======================================================
 
-void callback(int task_id, output_t value, void* args)
+const void callback(const int task_id, const output_t value, const void* args)
 {
 	globals_t* p_globals = (globals_t*)args;
 
@@ -50,6 +51,8 @@ void callback(int task_id, output_t value, void* args)
 	(*p_globals->p_map)[task_id] = to_string(value);
 	p_globals->map_size++;
 }
+
+// --------------------
 
 output_t calc_hash(input_t input)
 {
@@ -64,11 +67,19 @@ void stop_and_exit(shared_ptr<globals_t> p_globals, int return_code)
 {
 	write_log(LG_INFO, "MAIN", "Termination...");
 
-	p_globals->p_deque->terminate();
-	p_globals->p_map->clear();
-
+	if (p_globals)
+	{
+		if (p_globals->p_deque)
+			p_globals->p_deque->terminate();
+		
+		if (p_globals->p_map)
+			p_globals->p_map->clear();
+	}
+	
 	exit(return_code);
 }
+
+// --------------------
 
 void stop_and_exit_handler(int return_code, const string error_message, void* ptr)
 {
@@ -83,12 +94,17 @@ void stop_and_exit_handler(int return_code, const string error_message, void* pt
 
 	if (p_globals)
 	{
-		p_globals->p_deque->terminate();
-		p_globals->p_map->clear();
+		if (p_globals->p_deque)
+			p_globals->p_deque->terminate();
+
+		if (p_globals->p_map)
+			p_globals->p_map->clear();
 	}
 
 	exit(return_code);
 }
+
+// --------------------
 
 int finalize(shared_ptr<globals_t> p_globals)
 {
@@ -107,6 +123,8 @@ int finalize(shared_ptr<globals_t> p_globals)
 
 	return 0;
 }
+
+// --------------------
 
 int start(shared_ptr<globals_t> p_globals)
 {
@@ -142,6 +160,8 @@ int start(shared_ptr<globals_t> p_globals)
 
 	return 0;
 }
+
+// --------------------
 
 int init(int argc, const char* args[], shared_ptr<globals_t> & p_globals)
 {
@@ -212,7 +232,7 @@ int main(int argc, const char* argv[])
 	shared_ptr<globals_t> p_globals;
 
 	if (init(argc, argv, p_globals) < 0)
-		exit(EXIT_FAILURE);
+		stop_and_exit(move(p_globals), EXIT_FAILURE);
 
 	/// 3. Declaration of the main process
 	auto process = [&]() {

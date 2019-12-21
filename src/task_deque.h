@@ -19,7 +19,7 @@ namespace taskking
 {
 	/// ================================================================================================
 
-	template<class ReturnType, class Args>
+	template<class return_t, class input_t>
 	class task
 	{
 	private:
@@ -27,15 +27,15 @@ namespace taskking
 		bool __is_done;
 		int __id;
 
-		Args __args;
-		std::function<ReturnType(Args)> __function;
-		std::future<ReturnType> __future;
+		input_t __args;
+		std::function<return_t(input_t)> __function;
+		std::future<return_t> __future;
 
 	public:
 
 		// --------------------
 
-		task(int id, std::function<ReturnType(Args)> func, Args args) :
+		task(int id, std::function<return_t(input_t)> func, input_t args) :
 			__id(id),
 			__function(func),
 			__args(args),
@@ -61,7 +61,7 @@ namespace taskking
 
 		// --------------------
 
-		bool try_get_data(ReturnType& data)
+		bool try_get_data(return_t& data)
 		{
 			if (__is_done)
 			{
@@ -94,10 +94,11 @@ namespace taskking
 
 	/// ================================================================================================
 
-	template<class ReturnType, class Args>
+	template<class return_t, class input_t>
 	class task_deque
 	{
 	private:
+		typedef task<return_t, input_t> task_t;
 
 		enum class server_status
 		{
@@ -123,16 +124,16 @@ namespace taskking
 		}
 
 		server_status _status;
-		std::list<std::shared_ptr<task<ReturnType, Args>>> * _p_buffer;
+		std::list<std::shared_ptr<task_t>> * _p_buffer;
 		
 		std::mutex _mutex;
 		std::thread _update_thread;
 
-		void* _args;
-		void(*_p_callback)(int, ReturnType, void*);
+		const void* _args;
+		const void(*_p_callback)(const int, const return_t, const void*);
 		
-		size_t _max_tasks;
-		time_t _timeout;
+		const size_t _max_tasks;
+		const time_t _timeout;
 
 		std::atomic_int _run_tasks_count;
 		std::atomic_int _tasks_in_queue_count;
@@ -142,11 +143,11 @@ namespace taskking
 		void do_update()
 		{
 			_mutex.lock();
-			_p_buffer->remove_if([&](std::shared_ptr<task<ReturnType, Args>> shrp_task) -> bool
+			_p_buffer->remove_if([&](std::shared_ptr<task_t> shrp_task) -> bool
 				{
-					task<ReturnType, Args>* p_task = shrp_task.get();
+					task_t* p_task = shrp_task.get();
 
-					ReturnType data;
+					return_t data;
 					if (p_task->try_get_data(data))
 					{
 						_p_callback(p_task->id(), std::move(data), std::move(_args));
@@ -199,7 +200,6 @@ namespace taskking
 
 			update_status(server_status::starting);
 			_update_thread = std::thread(&task_deque::update, this);
-			// _update_thread.detach();
 		}
 
 		// --------------------
@@ -250,13 +250,13 @@ namespace taskking
 
 	public:
 
-		task_deque(size_t size, time_t timeout, void(*callback) (int, ReturnType, void*), void* args) :
+		task_deque(size_t size, time_t timeout, const void(*callback) (const int, const return_t, const void*), const void* args) :
 			_max_tasks(size),
 			_timeout(timeout),
 			_args(args)
 		{	
 			_p_callback = callback;
-			_p_buffer = new std::list<std::shared_ptr<task<ReturnType, Args>>>();
+			_p_buffer = new std::list<std::shared_ptr<task_t>>();
 			_status = server_status::stopped;
 		}
 
@@ -273,9 +273,9 @@ namespace taskking
 
 		// --------------------
 
-		task<ReturnType, Args>* new_task(task<ReturnType, Args> * p_task)
+		task_t* new_task(task_t * p_task)
 		{
-			std::shared_ptr<task<ReturnType, Args>> shrp_task(p_task);
+			std::shared_ptr<task_t> shrp_task(p_task);
 
 			_mutex.lock();
 			_p_buffer->push_back(shrp_task);

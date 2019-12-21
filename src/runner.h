@@ -18,7 +18,7 @@ namespace running
 		};
 
 		static std::map<int, SIGNAL_MODE> _signals;
-		static void(*_p_stop_fn)(int, const std::string, void*);
+		static void(*_stop_fn)(int, const std::string, void*);
 		static void* _args;
 		static void handler(int);
 		static std::string get_signal_message(int);

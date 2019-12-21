@@ -9,19 +9,19 @@ namespace running
 {
 	// --------------------
 
-	void(*runner::_p_stop_fn)(int, const string, void*) = {};
+	void(*runner::_stop_fn)(int, const string, void*) = {};
 	void* runner::_args = nullptr;
 
 	// --------------------
 
 	map<int, runner::SIGNAL_MODE> runner::_signals = {
-		make_pair(SIGTERM, SIGNAL_MODE::success), // Termination request
-		make_pair(SIGINT, SIGNAL_MODE::success), // CTRL + C signal
+		make_pair(SIGTERM, SIGNAL_MODE::success),	// Termination request
+		make_pair(SIGINT, SIGNAL_MODE::success),	// CTRL + C signal
 
-		make_pair(SIGSEGV, SIGNAL_MODE::failure), // Illegal storage access
-		make_pair(SIGILL, SIGNAL_MODE::failure), // Illegal instruction
-		make_pair(SIGABRT, SIGNAL_MODE::failure), // Abnormal termination
-		make_pair(SIGFPE, SIGNAL_MODE::failure), // Floating - point error
+		make_pair(SIGSEGV, SIGNAL_MODE::failure),	// Illegal storage access
+		make_pair(SIGILL, SIGNAL_MODE::failure),	// Illegal instruction
+		make_pair(SIGABRT, SIGNAL_MODE::failure),	// Abnormal termination
+		make_pair(SIGFPE, SIGNAL_MODE::failure),	// Floating - point error
 	};
 
 	// --------------------
@@ -49,14 +49,14 @@ namespace running
 		switch (_signals[error_code])
 		{
 		case SIGNAL_MODE::success:
-			_p_stop_fn(EXIT_SUCCESS, message, _args);
+			_stop_fn(EXIT_SUCCESS, message, _args);
 			break;
 
 		case SIGNAL_MODE::ignor:
 			break;
 
 		case SIGNAL_MODE::failure:
-			_p_stop_fn(EXIT_FAILURE, message, _args);
+			_stop_fn(EXIT_FAILURE, message, _args);
 			exit(EXIT_FAILURE);
 			break;
 		}
@@ -64,12 +64,12 @@ namespace running
 
 	// --------------------
 
-	bool runner::safe_invoke(function<void()> action, void(*p_stop_fn)(int, const string, void*), void* arg)
+	bool runner::safe_invoke(function<void()> action, void(*stop_fn)(int, const string, void*), void* arg)
 	{
-		_p_stop_fn = p_stop_fn;
+		_stop_fn = stop_fn;
 		_args = arg;
 
-		/** Parsing system signals */
+		/// Parsing system signals
 		signal(SIGTERM, handler);
 		signal(SIGINT, handler);
 		signal(SIGSEGV, handler);
@@ -77,6 +77,7 @@ namespace running
 		signal(SIGABRT, handler);
 		signal(SIGFPE, handler);
 
+		/// Safe invoke 
 		try
 		{
 			action();
@@ -84,7 +85,7 @@ namespace running
 		}
 		catch(exception e)
 		{
-			_p_stop_fn(EXIT_FAILURE, "Exception thrown: " + string(e.what()), arg);
+			_stop_fn(EXIT_FAILURE, "Exception thrown: " + string(e.what()), arg);
 			return false;
 		}
 	}
