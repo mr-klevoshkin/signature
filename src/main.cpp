@@ -19,7 +19,7 @@ using namespace running;
 
 // ====================================== GLOBAL TYPES =======================================================
 
-using input_t = std::vector<char>;
+using input_t = vector<char>;
 using output_t = size_t;
 
 typedef struct
@@ -54,16 +54,16 @@ const void callback(const int task_id, const output_t value, const void* args)
 
 // --------------------
 
-output_t calc_hash(input_t input)
+output_t calc_hash(const unique_ptr<input_t> input)
 {
 	hash<string> hash_fn;
 
-	return hash_fn(input.data());
+	return hash_fn(input->data());
 }
 
-// ========================================= ARCHITECTURE =======================================================
+// --------------------
 
-void stop_and_exit(shared_ptr<globals_t> p_globals, int return_code)
+void stop_and_exit(shared_ptr<globals_t> p_globals, const int return_code)
 {
 	write_log(LG_INFO, "MAIN", "Termination...");
 
@@ -81,7 +81,7 @@ void stop_and_exit(shared_ptr<globals_t> p_globals, int return_code)
 
 // --------------------
 
-void stop_and_exit_handler(int return_code, const string error_message, void* ptr)
+void stop_and_exit_handler(const int return_code, const string error_message, void* ptr)
 {
 	write_log(LG_WARNING, "MAIN", "Safe invoking is broken");
 
@@ -105,6 +105,51 @@ void stop_and_exit_handler(int return_code, const string error_message, void* pt
 }
 
 // --------------------
+
+bool try_get_buf(const size_t buffer_size, unique_ptr<input_t> & p_buf)
+{
+	try
+	{
+		p_buf = unique_ptr<input_t>(new input_t(buffer_size));
+		return true;
+	}
+	catch(...)
+	{
+		return false;
+	}
+}
+
+// --------------------
+
+bool check_block_size(const size_t block_size_in_bytes, string & error_message)
+{
+	if (block_size_in_bytes <= 0)
+	{
+		error_message = "Block size have to be more than 0";
+		return false;
+	}
+
+	unique_ptr<input_t> tmp;
+	if (!try_get_buf(block_size_in_bytes, tmp))
+	{
+		error_message = "Unable to allocate requested memory";
+		return false;
+	}
+
+	return true;
+}
+
+// --------------------
+
+void close_filestream(ifstream filestream)
+{
+	if (filestream && filestream.is_open())
+	{
+		filestream.close();
+	}
+}
+
+// ========================================= ARCHITECTURE =======================================================
 
 int finalize(shared_ptr<globals_t> p_globals)
 {
@@ -133,29 +178,41 @@ int start(shared_ptr<globals_t> p_globals)
 	{
 		return -1;
 	}
-
-	input_t buf(p_globals->block_size_b);
 	int current_part = 0;
+	size_t buffer_size = p_globals->block_size_b;
+	unique_ptr<input_t> p_buf;
 
-	while (!filestream.eof())
+	try
 	{
-		filestream.read(buf.data(), p_globals->block_size_b);
-
-		if (filestream.eof())
+		while (!filestream.eof())
 		{
-			int last_part_size = filestream.gcount();
-			if (last_part_size != p_globals->block_size_b)
+			if (try_get_buf(buffer_size, p_buf))
 			{
-				std::fill(buf.begin() + last_part_size, buf.end(), 0);				
+				filestream.read(p_buf->data(), p_globals->block_size_b);
+
+				if (filestream.eof())
+				{
+					int last_part_size = filestream.gcount();
+					if (last_part_size != p_globals->block_size_b)
+					{
+						fill(p_buf->begin() + last_part_size, p_buf->end(), 0);
+					}
+				}
+
+				p_globals->p_deque->new_task(new task<output_t, input_t>(current_part++, calc_hash, move(p_buf)));
 			}
 		}
-		p_globals->p_deque->new_task(new task<output_t, input_t>(current_part++, calc_hash, buf));
+		close_filestream(move(filestream));
 	}
-	filestream.close();
-
+	catch (exception e)
+	{
+		close_filestream(move(filestream));
+		throw e;
+	}
+	
 	while (p_globals->map_size != current_part)
 	{
-		this_thread::sleep_for(std::chrono::milliseconds(p_globals->update_timeout_ms));
+		this_thread::sleep_for(chrono::milliseconds(p_globals->update_timeout_ms));
 	}
 
 	return 0;
@@ -163,29 +220,25 @@ int start(shared_ptr<globals_t> p_globals)
 
 // --------------------
 
-int init(int argc, const char* args[], shared_ptr<globals_t> & p_globals)
+int init(const int argc, const char* args[], shared_ptr<globals_t> & p_globals)
 {
 	write_log(LG_INFO, "MAIN", "Initialization...");
 
 	// input validation
 	string input_file_path = args[1];
-	if (!std::experimental::filesystem::exists(input_file_path))
+	if (!experimental::filesystem::exists(input_file_path))
 	{
 		write_log(LG_ERROR, "MAIN", "Input file " + input_file_path + " does not exist");
 		return -1;
 	}
 
-	int block_size = 1; // default value
+	int block_size_in_bytes = 1000000; // default value is 1 Mb = 1 000 000 b
 	if (argc == 4)
 	{
 		string arg = args[3];
 		try
 		{
-			block_size = stoi(arg);
-			if (block_size <= 0)
-			{
-				throw new invalid_argument("Block size have to be more than 0");
-			}
+			block_size_in_bytes = stoi(arg) * 1000000; // input in Mb so convert to bytes			
 		}
 		catch(invalid_argument e)
 		{
@@ -194,14 +247,19 @@ int init(int argc, const char* args[], shared_ptr<globals_t> & p_globals)
 		}
 	}
 
-	p_globals = unique_ptr<globals_t>(new globals_t());
+	string error_message;
+	if (!check_block_size(block_size_in_bytes, error_message))
+	{
+		write_log(LG_ERROR, "MAIN", error_message);
+		return -1;
+	}
 	
+	p_globals = unique_ptr<globals_t>(new globals_t());
 	p_globals->input_file_path = input_file_path;
 	p_globals->output_file_path = args[2];
-	p_globals->block_size_b = block_size * 1000000; // megabytes to bytes
+	p_globals->block_size_b = block_size_in_bytes;
 	p_globals->max_threads = 500;
 	p_globals->update_timeout_ms = 300;
-
 	p_globals->p_map = unique_ptr<map<int, string>>(new map<int, string>());
 	p_globals->p_deque = unique_ptr<task_deque<output_t, input_t>>(
 		new task_deque<output_t, input_t>(p_globals->max_threads, p_globals->update_timeout_ms, callback, (void*)(p_globals.get())));
@@ -211,7 +269,7 @@ int init(int argc, const char* args[], shared_ptr<globals_t> & p_globals)
 }
 
 // ======================================== ENTER POINT ========================================================
-void print_usage_and_exit()
+static void print_usage_and_exit()
 {
 	cout <<
 		"Usage: ./signature input_file_path output_file_path <block_size>" << endl << endl <<
@@ -235,7 +293,7 @@ int main(int argc, const char* argv[])
 		stop_and_exit(move(p_globals), EXIT_FAILURE);
 
 	/// 3. Declaration of the main process
-	auto process = [&]() {
+	const auto process = [&]() {
 		
 		/// Start
 		if (start(p_globals) < 0)

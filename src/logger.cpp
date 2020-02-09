@@ -3,7 +3,7 @@
 #include <sstream>
 #include <iomanip>
 
-#define _CRT_SECURE_NO_WARNINGS
+#pragma warning(disable : 4996)
 
 #define CASE_TYPE_RETURN_STRING(type) case logger::msg_type::type: return #type;
 

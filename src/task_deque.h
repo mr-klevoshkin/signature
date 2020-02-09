@@ -14,6 +14,7 @@
 #define CaseStatusReturnString(status) case server_status::status: return #status;
 
 using namespace logging;
+using namespace std;
 
 namespace taskking
 {
@@ -27,18 +28,18 @@ namespace taskking
 		bool __is_done;
 		int __id;
 
-		input_t __args;
-		std::function<return_t(input_t)> __function;
-		std::future<return_t> __future;
+		unique_ptr<input_t> __args;
+		function<return_t(unique_ptr<input_t>)> __function;
+		future<return_t> __future;
 
 	public:
 
 		// --------------------
 
-		task(int id, std::function<return_t(input_t)> func, input_t args) :
+		task(int id, function<return_t(unique_ptr<input_t>)> func, unique_ptr<input_t> args) :
 			__id(id),
 			__function(func),
-			__args(args),
+			__args(move(args)),
 			__is_run(false),
 			__is_done(false)
 		{}
@@ -55,7 +56,7 @@ namespace taskking
 			}
 
 			__is_run = true;
-			__future = async(std::launch::async, __function, __args);
+			__future = async(launch::async, __function, move(__args));
 			return true;
 		}
 
@@ -110,7 +111,7 @@ namespace taskking
 			undefinded
 		};
 
-		std::string server_string(server_status st)
+		static string server_string(const server_status st)
 		{
 			switch (st)
 			{
@@ -124,10 +125,9 @@ namespace taskking
 		}
 
 		server_status _status;
-		std::list<std::shared_ptr<task_t>> * _p_buffer;
+		list<shared_ptr<task_t>> * _p_buffer;
 		
-		std::mutex _mutex;
-		std::thread _update_thread;
+		mutex _mutex;
 
 		const void* _args;
 		const void(*_p_callback)(const int, const return_t, const void*);
@@ -135,22 +135,22 @@ namespace taskking
 		const size_t _max_tasks;
 		const time_t _timeout;
 
-		std::atomic_int _run_tasks_count;
-		std::atomic_int _tasks_in_queue_count;
+		atomic_int _run_tasks_count;
+		atomic_int _tasks_in_queue_count;
 
 		// --------------------
 
 		void do_update()
 		{
 			_mutex.lock();
-			_p_buffer->remove_if([&](std::shared_ptr<task_t> shrp_task) -> bool
+			_p_buffer->remove_if([&](shared_ptr<task_t> shrp_task) -> bool
 				{
 					task_t* p_task = shrp_task.get();
 
 					return_t data;
 					if (p_task->try_get_data(data))
 					{
-						_p_callback(p_task->id(), std::move(data), std::move(_args));
+						_p_callback(p_task->id(), move(data), move(_args));
 						_run_tasks_count--;
 						return true;
 					}
@@ -173,7 +173,7 @@ namespace taskking
 			update_status(server_status::running);
 			while (_status == server_status::running)
 			{	
-				std::this_thread::sleep_for(std::chrono::milliseconds(_timeout));
+				this_thread::sleep_for(chrono::milliseconds(_timeout));
 
 				if (is_empty())
 				{
@@ -199,7 +199,7 @@ namespace taskking
 			}
 
 			update_status(server_status::starting);
-			_update_thread = std::thread(&task_deque::update, this);
+			thread(&task_deque::update, this).detach();
 		}
 
 		// --------------------
@@ -212,14 +212,6 @@ namespace taskking
 			}
 
 			update_status(server_status::stopping);
-			if (_update_thread.joinable())
-			{
-				write_log(LG_DEBUG, "DEQUE", "Waiting for terminating of update thread...");
-
-				_update_thread.join();
-
-				write_log(LG_DEBUG, "DEQUE", "Update thread was terminated");
-			}
 		}
 
 		// --------------------
@@ -240,7 +232,7 @@ namespace taskking
 
 		void update_status(server_status status)
 		{
-			std::stringstream ss;
+			stringstream ss;
 			ss << "Changing deque status from " << server_string(_status) << " to " << server_string(status);
 			write_log(LG_DEBUG, "DEQUE", ss.str());
 			_status = status;
@@ -256,7 +248,7 @@ namespace taskking
 			_args(args)
 		{	
 			_p_callback = callback;
-			_p_buffer = new std::list<std::shared_ptr<task_t>>();
+			_p_buffer = new list<shared_ptr<task_t>>();
 			_status = server_status::stopped;
 		}
 
@@ -267,15 +259,25 @@ namespace taskking
 			_mutex.lock();
 			_p_buffer->clear();
 			_mutex.unlock();
-
+			
 			update_status(server_status::undefinded);
+		}
+
+		// --------------------
+
+		bool can_create_new_task(size_t buffer_size)
+		{
+			if (_status == server_status::terminating || _status == server_status::undefinded)
+			{
+				return false;
+			}
 		}
 
 		// --------------------
 
 		task_t* new_task(task_t * p_task)
 		{
-			std::shared_ptr<task_t> shrp_task(p_task);
+			shared_ptr<task_t> shrp_task(p_task);
 
 			_mutex.lock();
 			_p_buffer->push_back(shrp_task);
@@ -294,9 +296,9 @@ namespace taskking
 
 		void terminate()
 		{
-			stop();
-
 			update_status(server_status::terminating);
+
+			stop();
 			this->~task_deque();
 		}
 
